@@ -240,6 +240,19 @@ tfoot td{font-weight:600;border-bottom:0;border-top:1.5px solid var(--ink)}
   .btrack i{transition:none}
 }
 
+/* página inicial e painel ao vivo */
+.home{max-width:640px;margin:6vh auto 0;text-align:left}
+.home .who{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:22px}
+.home .who button{text-align:left;background:var(--sheet);border:1.5px solid var(--ink);border-radius:6px;padding:18px 18px 16px;cursor:pointer;display:flex;flex-direction:column;gap:6px;color:var(--ink)}
+.home .who button:hover{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
+.home .who button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.home .who b{font-family:var(--font-display);font-size:28px;text-transform:uppercase;font-weight:700;line-height:1}
+.home .who span{font-size:14px;color:var(--ink-2);line-height:1.4}
+.livetbl td.st{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3)}
+.livetbl td.st.ok{color:var(--good)}
+.livetbl td.nt{font-family:var(--font-mono);font-weight:600;text-align:right}
+.live-h{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 12px;margin:18px 0 8px}
+.live-h h3{margin:0}
 /* materiais adicionais */
 :root{--cel:#D9DAD3;--tconc:#8C7F72;--fl-lam:#B08A5E;--f-cq:#B4B5AE;--arg:#CBC6BA;--arg2:#C1C5BE}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--cel:#A3A59D;--tconc:#6F655B;--fl-lam:#8F6E47;--f-cq:#7F817A;--arg:#7D796F;--arg2:#767A73}}
@@ -1153,7 +1166,7 @@ function boardData(){
 }
 function renderBoard(){
   const el=$('#board');
-  const hide=S.mode==='teacher'||S.mode==='prof'||(S.mode==='local'&&S.screen==='setup'&&window.matchMedia&&window.matchMedia('(max-width:880px)').matches);
+  const hide=S.mode==='teacher'||S.mode==='prof'||S.mode==='home'||(S.mode==='local'&&S.screen==='setup'&&window.matchMedia&&window.matchMedia('(max-width:880px)').matches);
   el.hidden=hide; $('#main').classList.toggle('solo',hide);
   if(hide) return;
   const b=boardData();
@@ -1393,18 +1406,31 @@ function currentResult(){
   if(S.mode==='student'&&S.screen==='done'&&S.players[0]){ const p=S.players[0]; return {key:resultCode(p.ch,S.scen,gctx().cli,gctx().ev)+'|'+p.name,url:sheetURL(p.name,p.ch,S.scen,gctx().cli,gctx().ev,liveRoundCode())}; }
   return null;
 }
+function jsonp(url,ms){
+  return new Promise((res,rej)=>{
+    const cb='__oe'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+    const sc=document.createElement('script'); let fin=false;
+    const end=(f,v)=>{ if(fin) return; fin=true; clearTimeout(t); try{ delete window[cb]; }catch(e){ window[cb]=undefined; } sc.remove(); f(v); };
+    window[cb]=d=>end(res,d);
+    sc.onerror=()=>end(rej,new Error('load'));
+    const t=setTimeout(()=>end(rej,new Error('timeout')),ms||20000);
+    sc.src=url+(url.indexOf('?')<0?'?':'&')+'callback='+cb;
+    document.head.appendChild(sc);
+  });
+}
+const qsOf=o=>Object.keys(o).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(o[k])).join('&');
 function sendStatus(key){
   const st=SENT[key];
   if(st==='ok') return '<span style="color:var(--good)">✓ Resultado enviado automaticamente para a planilha da turma.</span>';
-  if(st==='unsure') return 'Resultado enviado para a planilha da turma.';
+  if(st==='fail') return '<span style="color:var(--warn)">Não foi possível enviar para a planilha. Avise o professor e mostre o código de resultado abaixo.</span>';
   return 'Enviando seu resultado para a planilha…';
 }
 function autoSend(){
   const r=currentResult(); if(!r||SENT[r.key]) return;
   SENT[r.key]='pending';
   const done=st=>{ SENT[r.key]=st; const el=document.querySelector('[data-send]'); if(el) el.innerHTML=sendStatus(r.key); };
-  const beacon=()=>{ try{ const im=new Image(); im.src=r.url; }catch(e){} done('unsure'); };
-  try{ fetch(r.url,{mode:'no-cors',credentials:'include',keepalive:true}).then(()=>done('ok'),beacon); }catch(e){ beacon(); }
+  const tryOnce=n=>jsonp(r.url).then(d=>done(d&&d.ok?'ok':'fail'),()=>{ if(n>0) setTimeout(()=>tryOnce(n-1),4000); else done('fail'); });
+  tryOnce(2);
 }
 const sendPanel=(url,key)=>`<p class="hint" data-send style="margin:10px 0 0">${sendStatus(key)}</p>`;
 const sendBtn=url=>url?`<a class="btn primary sm" href="${esc(url)}" target="_blank" rel="noopener">Enviar resultado para a planilha</a>`:'';
@@ -1462,6 +1488,7 @@ function soloStart(){
   else S.rc=null;
   S.n=1; S.scenPick='sortear'; S.cliPick='sortear'; S.evOn=true;
   startGame();
+  if(SHEETS_URL) jsonp(SHEETS_URL+'?'+qsOf({acao:'entrar',nome:name,rodada:S.rc?S.rc.code:'LIVRE'})).catch(()=>{});
 }
 function endHTML(){
   const res=S.players.map((p,i)=>Object.assign({i,name:p.name},score(p.ch,S.scen))).sort((a,b)=>(b.nota-a.nota)||(b.min-a.min));
@@ -1632,8 +1659,54 @@ function profGo(){
   const cli=CLI_KEYS.includes(S.cliPick)?S.cliPick:CLI_KEYS[Math.floor(Math.random()*CLI_KEYS.length)];
   const ev=S.evOn?drawEvents(Date.now().toString(36)):[];
   const code=roundCode(scen,cli,ev); const link=ARTIFACT_URL+'?rodada='+code;
-  S.prof={code,scen,cli,ev,link,qr:qrFor(link)};
-  renderDesk(); scrollDesk();
+  S.prof={code,scen,cli,ev,link,qr:qrFor(link)}; S.live=null; S.liveErr='';
+  try{ history.replaceState(null,'','?professor&rodada='+code); }catch(e){}
+  renderDesk(); scrollDesk(); livePoll();
+}
+function profRestore(code){
+  const d=decodeRound(code); if(!d) return;
+  const link=ARTIFACT_URL+'?rodada='+d.code;
+  S.prof={code:d.code,scen:d.scen,cli:d.cli,ev:d.ev,link,qr:qrFor(link)};
+}
+let liveTimer=null;
+function livePoll(){
+  clearTimeout(liveTimer);
+  if(S.mode!=='prof'||!S.prof||!SHEETS_URL) return;
+  const code=S.prof.code;
+  jsonp(SHEETS_URL+'?'+qsOf({acao:'ranking',rodada:code}),15000)
+    .then(d=>{ if(S.prof&&S.prof.code===code){ S.live=d; S.liveErr=''; } })
+    .catch(()=>{ S.liveErr='Não consegui ler a planilha. Confira se o script foi atualizado e implantado para “Qualquer pessoa”.'; })
+    .then(()=>{ const el=$('#proflive'); if(el) el.innerHTML=liveHTML(); liveTimer=setTimeout(livePoll,8000); });
+}
+function liveHTML(){
+  const L=S.live;
+  if(!L) return `<p class="hint">${S.liveErr||'Carregando os alunos da planilha…'}</p>`;
+  const al=L.alunos||[], fin=al.filter(a=>a.status==='entregou').length;
+  const f2=v=>v===''||v==null||isNaN(Number(v))?'—':Number(v).toFixed(2).replace('.',',');
+  let pos=0;
+  const rows=al.map(a=>{ const ok=a.status==='entregou'; if(ok) pos++; return `<tr><td class="n">${ok?pos+'º':''}</td><td>${esc(a.nome)}</td><td class="st${ok?' ok':''}">${ok?'entregou':'jogando'}</td><td class="nt">${ok?f2(a.nota):'—'}</td><td class="muted">${ok?esc(a.solo||''):''}</td></tr>`; }).join('');
+  const chg=STAGES.map(stg=>{
+    const c=(L.escolhas||{})[stg.id]||{}; const tot=stg.opts.reduce((x,o)=>x+(c[o.name]||0),0);
+    const max=Math.max(0,...stg.opts.map(o=>c[o.name]||0));
+    return `<div class="panel chs"><h4>${stg.name}</h4>${tot?stg.opts.map(o=>{ const n=c[o.name]||0; return `<div class="cbar${n===max&&n>0?' lead':''}"><span>${o.name}</span><b>${Math.round(n/tot*100)}% (${n})</b><i><em style="width:${(n/tot*100).toFixed(0)}%"></em></i></div>`; }).join(''):'<p class="hint" style="margin:0">Nenhuma obra entregue ainda.</p>'}</div>`;
+  }).join('');
+  return `${S.liveErr?`<p class="hint" style="color:var(--warn)">${S.liveErr}</p>`:''}
+    <div class="stats"><div class="stat"><b>${al.length}</b><span>na sala</span></div><div class="stat"><b>${al.length-fin}</b><span>jogando</span></div><div class="stat"><b>${fin}</b><span>obras entregues</span></div></div>
+    <div class="live-h"><h3>Alunos e notas</h3><span class="hint" style="margin:0">Atualiza sozinho a cada poucos segundos</span></div>
+    ${al.length?`<div class="tbl"><table class="livetbl" style="min-width:0"><thead><tr><th class="n">Pos.</th><th>Nome</th><th>Status</th><th class="n">Nota</th><th>Solo</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<p class="hint">Ninguém entrou ainda. Peça para escanearem o QR code.</p>'}
+    <div class="live-h"><h3>Escolhas da turma</h3><span class="hint" style="margin:0">Entre as obras entregues</span></div>
+    <div class="chgrid">${chg}</div>`;
+}
+function homeHTML(){
+  return `<div class="home">
+    <p class="eyebrow">Obra Equilibrada · jogo didático de engenharia civil</p>
+    <h1 class="hero">Olá! Você está ajudando uma pesquisa sobre ensino em engenharia.</h1>
+    <p class="lede">Neste jogo, cada pessoa escolhe como construir uma casa térrea, etapa por etapa, equilibrando preço, tempo, durabilidade, manutenção e estética. As respostas são usadas apenas para fins acadêmicos.</p>
+    <h2 class="h2" style="margin-top:26px">Você é:</h2>
+    <div class="who">
+      <button type="button" data-act="goprof"><b>Professor</b><span>Gerar a rodada, projetar o QR code e acompanhar os alunos e as notas.</span></button>
+      <button type="button" data-act="goaluno"><b>Aluno</b><span>Digitar seu nome e o código da rodada e construir a sua casa.</span></button>
+    </div></div>`;
 }
 function profHTML(){
   const P=S.prof;
@@ -1649,7 +1722,8 @@ function profHTML(){
       <div class="qr-tile" style="margin-top:12px">${P.qr?`<img src="${P.qr}" alt="QR code que abre o jogo com o código da rodada">`:'<p style="color:#000;margin:0;padding:20px">QR indisponível. Use o link abaixo.</p>'}</div>
       <p class="url">${esc(P.link)}</p></div>
     <div class="panel" style="margin-top:12px"><h3>Configuração sorteada</h3><p class="hint" style="margin:0">${SCEN[P.scen].name} · ${CLIENTS[P.cli].name}${P.ev.length?` · imprevistos: ${P.ev.map(id=>EVM[id].title.toLowerCase()).join(', ')}`:' · sem imprevistos'}.</p>
-      <p class="hint" style="margin:10px 0 0">Projete esta tela. O aluno escaneia o QR, o código já vem preenchido, ele digita o nome e joga no próprio celular. Ao entregar a obra, o resultado vai sozinho para a planilha da turma, com ranking e estatísticas.</p></div>`
+      <p class="hint" style="margin:10px 0 0">Projete esta tela. O aluno escaneia o QR, o código já vem preenchido, ele digita o nome e joga no próprio celular. Ao entregar a obra, o resultado vai sozinho para a planilha da turma.</p></div>
+    <div id="proflive">${liveHTML()}</div>`
     :`<p class="eyebrow">Página do professor</p><h1 class="hero">Gere o código da rodada e projete o QR</h1><p class="lede">Escolha região, cliente e imprevistos (ou sorteie) e clique em Gerar rodada. Todos os alunos jogam a mesma rodada; o solo de cada lote continua sorteado por aluno.</p>`;
   return `<div class="dash"><div class="dcol">${left}</div><div class="dcol">${right}</div></div>`;
 }
@@ -1660,6 +1734,7 @@ function renderDesk(){
   if(S.mode==='connecting') h=connectingHTML();
   else if(S.mode==='teacher') h=dashHTML();
   else if(S.mode==='prof') h=profHTML();
+  else if(S.mode==='home') h=homeHTML();
   else if(S.mode==='student') h=S.screen==='join'?joinHTML():S.screen==='wait'?waitHTML():S.screen==='event'?eventHTML():S.screen==='play'?playHTML():S.screen==='done'?doneHTML():S.screen==='denied'?deniedHTML():joinHTML();
   else h=S.screen==='setup'?setupHTML():S.screen==='event'?eventHTML():S.screen==='play'?playHTML():endHTML();
   d.innerHTML=h;
@@ -1835,7 +1910,7 @@ function afterSnap(){
 }
 function classOff(){
   CL.state='off';
-  if(S.mode!=='local'&&S.mode!=='prof'){ S.mode='local'; S.screen='setup'; }
+  if(S.mode!=='local'&&S.mode!=='prof'&&S.mode!=='home'){ S.mode='local'; S.screen='setup'; }
   render();
 }
 async function initClass(){
@@ -1869,6 +1944,8 @@ document.addEventListener('click',e=>{
     else if(a==='close') setLive({status:'closed'});
     else if(a==='evcont') evContinue();
     else if(a==='profgo') profGo();
+    else if(a==='goprof'){ S.mode='prof'; S.screen='prof'; try{ history.replaceState(null,'','?professor'); }catch(e){} render(); }
+    else if(a==='goaluno'){ S.mode='local'; S.screen='setup'; render(); }
     else if(a==='userc'){ const v=($('#rcode')||{}).value||''; const d=decodeRound(v); const m=$('#rcmsg'); if(!d){ if(m) m.innerHTML='<span style="color:var(--warn)">Código não reconhecido. Confira as 4 letras e números com o professor.</span>'; return; } S.rc=d; S.rcode=d.code; renderDesk(); renderBoard(); }
     else if(a==='clearrc'){ S.rc=null; S.rcode=''; renderDesk(); }
     else if(a==='import') importCodes();
@@ -1901,12 +1978,14 @@ document.addEventListener('input',e=>{
 function start(data){
   try{
     const qs=new URLSearchParams(location.search);
-    if(qs.has('professor')){ S.mode='prof'; S.screen='prof'; }
+    if(qs.has('professor')){ S.mode='prof'; S.screen='prof'; if(qs.get('rodada')) profRestore(qs.get('rodada')); }
     else if(qs.get('rodada')){ S.rcode=qs.get('rodada'); const d=decodeRound(S.rcode); if(d) S.rc=d; }
+    else if(!HAS_CLAUDE){ S.mode='home'; S.screen='home'; }
   }catch(e){}
   if(data&&data.screen){ Object.assign(S,data); S.fresh=null; if(S.mode!=='local') S.mode=HAS_CLAUDE?S.mode:'local'; }
   render();
   initClass();
+  if(S.mode==='prof'&&S.prof) livePoll();
 }
 window.claude?.hot?.snapshot?.(()=>JSON.parse(JSON.stringify(S)));
 window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
